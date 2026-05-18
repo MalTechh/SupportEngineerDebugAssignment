@@ -14,32 +14,26 @@ public static class TaskEndpoints
         group.MapGet("", async (string userId, int? limit, AppDbContext db, ILogger<Program> logger) =>
         {
             var sw = Stopwatch.StartNew();
-            var all = await db.Tasks.AsNoTracking().ToListAsync();
+            var requestedLimit = Math.Clamp(limit ?? 50, 1, 200);
 
-            var filtered = all
+            var filtered = await db.Tasks
+                .AsNoTracking()
                 .Where(t => t.UserId == userId)
                 .OrderByDescending(t => t.CreatedAt)
-                .Take(Math.Clamp(limit ?? 50, 1, 200))
-                .ToList();
+                .ThenByDescending(t => t.Id)
+                .Take(requestedLimit)
+                .ToListAsync();
 
             sw.Stop();
             logger.LogInformation(
                 "ListTasks completed userId={UserId} limit={Limit} count={Count} elapsedMs={ElapsedMs}",
-                userId, limit ?? 50, filtered.Count, sw.ElapsedMilliseconds);
+                userId, requestedLimit, filtered.Count, sw.ElapsedMilliseconds);
 
             return Results.Ok(filtered);
         });
 
         group.MapPost("", async (HttpContext ctx, CreateTaskRequest req, AppDbContext db, ILogger<Program> logger) =>
         {
-            var clientTimestamp = ctx.Request.Headers["X-Client-Timestamp"].ToString();
-            var hasTimestamp = !string.IsNullOrWhiteSpace(clientTimestamp);
-            logger.LogInformation(
-                "CreateTask request UserId={UserId} Title={Title} X-Client-Timestamp present={HasTimestamp} length={Length}",
-                req?.UserId ?? "(null)", req?.Title ?? "(null)", hasTimestamp, clientTimestamp?.Length ?? 0);
-
-            var createdAt = DateTime.Parse(clientTimestamp);
-
             if (string.IsNullOrWhiteSpace(req.UserId) || string.IsNullOrWhiteSpace(req.Title))
                 return Results.BadRequest(new { message = "userId and title are required" });
 
@@ -48,8 +42,8 @@ public static class TaskEndpoints
                 UserId = req.UserId,
                 Title = req.Title.Trim(),
                 Status = "open",
-                CreatedAt = createdAt,
-                UpdatedAt = createdAt
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
             };
 
             db.Tasks.Add(task);
