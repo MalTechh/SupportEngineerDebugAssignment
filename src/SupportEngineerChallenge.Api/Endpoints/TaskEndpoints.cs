@@ -37,13 +37,15 @@ public static class TaskEndpoints
             if (string.IsNullOrWhiteSpace(req.UserId) || string.IsNullOrWhiteSpace(req.Title))
                 return Results.BadRequest(new { message = "userId and title are required" });
 
+            var createdAt = DateTime.UtcNow;
+
             var task = new TaskItem
             {
                 UserId = req.UserId,
                 Title = req.Title.Trim(),
                 Status = "open",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                CreatedAt = createdAt,
+                UpdatedAt = createdAt
             };
 
             db.Tasks.Add(task);
