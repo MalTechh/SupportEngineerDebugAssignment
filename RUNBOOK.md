@@ -1,7 +1,5 @@
 # Runbook — SupportEngineerChallenge
 
-> Update this file as part of the exercise.
-
 ## Service overview
 - **Service:** SupportEngineerChallenge.Api
 - **Purpose:** Minimal task tracker (create + list tasks)
@@ -9,13 +7,13 @@
 
 ## Common commands
 
-**Run locally**
+### Run locally
 ```bash
 cd src/SupportEngineerChallenge.Api
 dotnet run
 ```
 
-**Run tests**
+### Run tests
 ```bash
 dotnet test
 ```
@@ -26,32 +24,90 @@ dotnet test
 
 ## Using log artifacts
 
-- **Create-task 500:** Inspect `artifacts/sample_api_log.txt` (or production logs). Look for the `CreateTask request` line — `X-Client-Timestamp present=False` or `length=0` indicates missing/invalid header. The stack trace shows `FormatException` at `DateTime.Parse`.
-- **Slow list:** Look for `ListTasks completed` lines with high `elapsedMs` (e.g. `artifacts/sample_slow_list_log.txt`). Correlate `userId` and `limit` with slow requests.
+### Create-task 500
+Inspect `artifacts/sample_api_log.txt` or production logs.
 
-## Troubleshooting checklist (starter)
+Look for:
+- `CreateTask request`
+- `X-Client-Timestamp present=False`
+- `length=0`
+- `System.FormatException`
+- `DateTime.Parse`
+- `TaskEndpoints.cs`
+
+### Slow task list
+Inspect `ListTasks completed` logs and database command logs.
+
+Look for:
+- high `elapsedMs`
+- requested `userId`
+- requested `limit`
+- SQL that scans all tasks instead of applying `WHERE`, `ORDER BY`, and `LIMIT`
+
+Expected fixed query shape:
+
+```sql
+WHERE "t"."UserId" = @__userId_0
+ORDER BY "t"."CreatedAt" DESC, "t"."Id" DESC
+LIMIT @__p_1
+```
+
+## Troubleshooting checklist
 
 ### “Create task fails with 500”
-- Check API logs in console.
-- Verify request payload and headers.
-- Look for unhandled exceptions in `POST /api/tasks`.
+- Check API logs for `CreateTask request`.
+- Confirm request body includes `userId` and `title`.
+- Check for unhandled `FormatException`.
+- Verify the endpoint uses server-side `DateTime.UtcNow` for task creation time.
+- Confirm invalid payloads return `400`, not `500`.
 
 ### “Tasks list is slow”
-- Confirm dataset size (seed can be large).
-- Inspect how the list endpoint fetches and filters data.
-- Review query patterns and database usage.
+- Check `ListTasks completed` logs for high `elapsedMs`.
+- Review generated SQL.
+- Confirm filtering, ordering, and limiting are applied in SQL.
+- Confirm the endpoint does not load the full task table into memory.
+- Validate large seeded datasets still return quickly.
 
 ### “Duplicates / wrong order after refresh”
-- Compare API response vs UI rendering.
-- Check the UI state update logic during refresh.
-- Verify how the list is merged and ordered.
+- Refresh the UI repeatedly for the same user.
+- Confirm task IDs are not repeated.
+- Confirm newest tasks appear first.
+- Confirm switching users clears/replaces the current task list.
+- Compare browser output with `GET /api/tasks?userId={id}&limit={n}` response.
 
-## Verification steps (starter)
-- Create tasks from UI and via Swagger.
-- Refresh tasks repeatedly; confirm no duplicates and ordering is correct.
-- Validate list endpoint returns only requested user's tasks.
+## Verification steps
 
-## Rollback / mitigation ideas (starter)
-- Roll back to last known good version.
-- Temporarily disable problematic client behavior (feature flag / UI change).
-- Add guardrails (e.g. input validation, error handling) to prevent unhandled exceptions.
+### Automated
+Run:
+
+```bash
+dotnet test
+```
+
+Tests should cover:
+- valid task creation
+- validation failure for missing required fields
+- list endpoint only returns requested user
+- list endpoint respects limit
+- list endpoint returns newest tasks first
+
+### Manual
+- Start the API locally.
+- Open the UI.
+- Create 10+ tasks.
+- Confirm no intermittent 500s.
+- Confirm newly created tasks appear at the top.
+- Refresh 10+ times.
+- Confirm no duplicate rows appear.
+- Switch between users.
+- Confirm only the selected user's tasks are shown.
+- Confirm logs show SQL-level filtering, ordering, and limiting.
+
+## Rollback / mitigation
+
+If the fix regresses:
+- Roll back to the previous known-good deployment.
+- Temporarily disable the UI path that sends malformed task creation requests.
+- Monitor `POST /api/tasks` 500 rates.
+- Monitor `GET /api/tasks` latency.
+- If list latency spikes, reduce default/max `limit` temporarily.
